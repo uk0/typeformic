@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcscmblueprint
+*.xccheckout
+
+# Claude Code / local dev workspace (never push)
+CLAUDE.md
+.claude/
+docs/
+
+# Local scratch / generated artifacts
+.brand-work/
+*_article/
+/tmp/
+
+# Secrets
+.env
+.env.*
+
+# IDE
+.idea/
