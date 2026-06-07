@@ -17,6 +17,7 @@ docs/
 # Local scratch / generated artifacts
 .brand-work/
 *_article/
+dist/
 /tmp/
 
 # Secrets
