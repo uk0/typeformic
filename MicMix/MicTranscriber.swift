@@ -45,11 +45,16 @@ final class MicTranscriber: ObservableObject {
     private var silenceAccumulated: TimeInterval = 0
 
     func requestAuthorization() async -> Bool {
-        await withCheckedContinuation { cont in
+        let speechAuthorized = await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { status in
                 cont.resume(returning: status == .authorized)
             }
         }
+        guard speechAuthorized else { return false }
+        // macOS does not reliably raise the microphone prompt from AVAudioEngine
+        // alone — without this the input node just yields silence. Request capture
+        // access explicitly and wait for the grant.
+        return await AVCaptureDevice.requestAccess(for: .audio)
     }
 
     func start() async throws {

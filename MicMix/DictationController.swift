@@ -53,7 +53,7 @@ final class DictationController: ObservableObject {
 
     private func beginRecording() async {
         guard await transcriber.requestAuthorization() else {
-            phase = .error("Speech recognition not authorized")
+            phase = .error("Grant Microphone & Speech access in System Settings")
             return
         }
         guard KeystrokeInjector.ensureAccessibilityTrusted(prompt: true) else {
