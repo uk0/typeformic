@@ -18,8 +18,8 @@ struct MicMixApp: App {
             Button("Show / Hide Widget") {
                 delegate.togglePanel()
             }
-            SettingsLink {
-                Text("Settings…")
+            Button("Settings…") {
+                delegate.showSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
             Divider()
@@ -27,10 +27,6 @@ struct MicMixApp: App {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
-        }
-
-        Settings {
-            SettingsView()
         }
     }
 }
@@ -40,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = DictationController()
     private let hotKey = HotKey()
     private var panel: FloatingPanel?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -59,6 +56,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             showPanel()
         }
+    }
+
+    func showSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "MicMix Settings"
+            window.contentView = NSHostingView(rootView: SettingsView())
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     private func showPanel() {

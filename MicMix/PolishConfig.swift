@@ -15,6 +15,23 @@ enum PolishConfig {
         static let model = "polish.model"
         static let prompt = "polish.prompt"
         static let engine = "polish.engine"
+        static let provider = "polish.provider"
+        static let dictationLocale = "dictation.locale"
+    }
+
+    /// Remote API wire format.
+    enum Provider: String, CaseIterable, Identifiable {
+        case openai
+        case anthropic
+
+        var id: String { rawValue }
+        var label: String { self == .anthropic ? "Anthropic" : "OpenAI-compatible" }
+        var defaultBaseURL: String {
+            self == .anthropic ? "https://api.anthropic.com" : "https://api.openai.com/v1"
+        }
+        var modelPlaceholder: String {
+            self == .anthropic ? "claude-sonnet-4-6" : "gpt-4o-mini"
+        }
     }
 
     /// Which model backs the cleanup step.
@@ -45,6 +62,7 @@ enum PolishConfig {
 
     struct Snapshot {
         var engine: Engine
+        var provider: Provider
         var baseURL: String
         var apiKey: String
         var model: String
@@ -55,13 +73,20 @@ enum PolishConfig {
             !baseURL.isEmpty && !apiKey.isEmpty && !model.isEmpty
         }
 
-        /// Resolves the chat-completions endpoint from the configured base URL.
-        var chatCompletionsURL: URL? {
+        /// Resolves the request endpoint from the base URL, per provider.
+        var endpointURL: URL? {
             var base = baseURL
             while base.hasSuffix("/") { base.removeLast() }
             guard !base.isEmpty else { return nil }
-            if base.hasSuffix("/chat/completions") { return URL(string: base) }
-            return URL(string: base + "/chat/completions")
+            switch provider {
+            case .openai:
+                if base.hasSuffix("/chat/completions") { return URL(string: base) }
+                return URL(string: base + "/chat/completions")
+            case .anthropic:
+                if base.hasSuffix("/messages") { return URL(string: base) }
+                if base.hasSuffix("/v1") { return URL(string: base + "/messages") }
+                return URL(string: base + "/v1/messages")
+            }
         }
     }
 
@@ -73,8 +98,10 @@ enum PolishConfig {
         }
         let storedPrompt = defaults.string(forKey: Keys.prompt)
         let engine = Engine(rawValue: defaults.string(forKey: Keys.engine) ?? "") ?? .onDevice
+        let provider = Provider(rawValue: defaults.string(forKey: Keys.provider) ?? "") ?? .openai
         return Snapshot(
             engine: engine,
+            provider: provider,
             baseURL: trimmed(Keys.baseURL),
             apiKey: trimmed(Keys.apiKey),
             model: trimmed(Keys.model),

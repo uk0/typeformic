@@ -13,6 +13,7 @@ import SwiftUI
 final class DictationController: ObservableObject {
     enum Phase: Equatable {
         case idle
+        case preparing
         case recording
         case polishing
         case typing
@@ -46,7 +47,7 @@ final class DictationController: ObservableObject {
             await beginRecording()
         case .recording:
             await finishRecording()
-        case .polishing, .typing:
+        case .preparing, .polishing, .typing:
             break
         }
     }
@@ -64,6 +65,7 @@ final class DictationController: ObservableObject {
         transcriber.onSilence = { [weak self] in
             Task { await self?.autoFinish() }
         }
+        phase = .preparing
         do {
             try await transcriber.start()
             phase = .recording

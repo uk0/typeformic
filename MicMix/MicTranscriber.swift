@@ -43,6 +43,8 @@ final class MicTranscriber: ObservableObject {
     private static let silenceTimeout: TimeInterval = 1.5
     private var voiceDetected = false
     private var silenceAccumulated: TimeInterval = 0
+    private var peakLevel: Float = 0
+    private var resultCount = 0
 
     func requestAuthorization() async -> Bool {
         let speechAuthorized = await withCheckedContinuation { cont in
@@ -60,12 +62,31 @@ final class MicTranscriber: ObservableObject {
     func start() async throws {
         guard !isRecording else { return }
         resetState()
+        Self.dbgReset()
+
+        let supported = await SpeechTranscriber.supportedLocales
+        dbg("supportedLocales(\(supported.count)): \(supported.map { $0.identifier }.joined(separator: ","))")
+        let installed = await SpeechTranscriber.installedLocales
+        dbg("installedLocales(\(installed.count)): \(installed.map { $0.identifier }.joined(separator: ","))")
 
         let locale = await Self.preferredSupportedLocale()
-        let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+        dbg("chosen locale: \(locale.identifier)")
+        let transcriber = SpeechTranscriber(
+            locale: locale,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: [.audioTimeRange]
+        )
         self.transcriber = transcriber
 
-        try await Self.ensureAssetsInstalled(for: transcriber)
+        dbg("ensuring assets…")
+        do {
+            try await ensureAssetsInstalled(for: transcriber)
+        } catch {
+            dbg("ASSET ERROR: \(error)")
+            throw error
+        }
+        dbg("assets ready")
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
@@ -79,9 +100,14 @@ final class MicTranscriber: ObservableObject {
             guard let self else { return }
             do {
                 for try await result in transcriber.results {
+                    let text = String(result.text.characters)
+                    self.resultCount += 1
+                    self.dbg("result #\(self.resultCount) final=\(result.isFinal): \(text)")
                     await self.append(result: result)
                 }
+                self.dbg("results stream ended (total=\(self.resultCount))")
             } catch {
+                self.dbg("RESULTS ERROR: \(error)")
                 await self.report(error: error)
             }
         }
@@ -89,11 +115,13 @@ final class MicTranscriber: ObservableObject {
         try await analyzer.start(inputSequence: stream)
         isRecording = true
         statusMessage = "Listening…"
+        dbg("analyzer started — listening")
     }
 
     func stop() async -> String {
         guard isRecording else { return finalText() }
         isRecording = false
+        dbg("stopping. peakLevel=\(peakLevel) results=\(resultCount) phrases=\(phrases.count)")
         statusMessage = "Finalizing…"
 
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -105,6 +133,7 @@ final class MicTranscriber: ObservableObject {
         do {
             try await analyzer?.finalizeAndFinishThroughEndOfInput()
         } catch {
+            dbg("FINALIZE ERROR: \(error)")
             report(error: error)
         }
         await resultsTask?.value
@@ -112,7 +141,9 @@ final class MicTranscriber: ObservableObject {
         analyzer = nil
         transcriber = nil
         statusMessage = ""
-        return finalText()
+        let out = finalText()
+        dbg("final text(\(out.count) chars): \(out)")
+        return out
     }
 
     // MARK: - Private
@@ -123,6 +154,8 @@ final class MicTranscriber: ObservableObject {
         phrases.removeAll()
         voiceDetected = false
         silenceAccumulated = 0
+        peakLevel = 0
+        resultCount = 0
     }
 
     private func append(result: SpeechTranscriber.Result) {
@@ -147,12 +180,15 @@ final class MicTranscriber: ObservableObject {
     /// enough trailing silence accrues after speech began.
     private func updateVAD(level: Float, bufferDuration: TimeInterval) {
         guard isRecording else { return }
+        peakLevel = max(peakLevel, level)
         if level >= Self.voiceThreshold {
+            if !voiceDetected { dbg("VAD: speech onset (level=\(level))") }
             voiceDetected = true
             silenceAccumulated = 0
         } else if voiceDetected {
             silenceAccumulated += bufferDuration
             if silenceAccumulated >= Self.silenceTimeout {
+                dbg("VAD: trailing silence — auto-finish")
                 voiceDetected = false
                 silenceAccumulated = 0
                 onSilence?()
@@ -188,9 +224,11 @@ final class MicTranscriber: ObservableObject {
                              channels: 1,
                              interleaved: false)!
 
+        dbg("formats: input=\(Int(inputFormat.sampleRate))Hz/\(inputFormat.channelCount)ch analyzer=\(Int(analyzerFormat.sampleRate))Hz/\(analyzerFormat.channelCount)ch convert=\(inputFormat != analyzerFormat)")
         let converter: AVAudioConverter? = (inputFormat == analyzerFormat)
             ? nil
             : AVAudioConverter(from: inputFormat, to: analyzerFormat)
+        converter?.primeMethod = .none
 
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             let payload: AVAudioPCMBuffer
@@ -224,13 +262,9 @@ final class MicTranscriber: ObservableObject {
         var consumed = false
         var error: NSError?
         let status = converter.convert(to: output, error: &error) { _, inputStatus in
-            if consumed {
-                inputStatus.pointee = .endOfStream
-                return nil
-            }
-            consumed = true
-            inputStatus.pointee = .haveData
-            return buffer
+            defer { consumed = true }
+            inputStatus.pointee = consumed ? .noDataNow : .haveData
+            return consumed ? nil : buffer
         }
         if status == .error || error != nil { return nil }
         return output
@@ -238,6 +272,16 @@ final class MicTranscriber: ObservableObject {
 
     private static func preferredSupportedLocale() async -> Locale {
         let supported = await SpeechTranscriber.supportedLocales
+
+        // Explicit user choice from Settings wins, when supported.
+        let configured = (UserDefaults.standard.string(forKey: PolishConfig.Keys.dictationLocale) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configured.isEmpty,
+           let match = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: configured)) {
+            return match
+        }
+
+        // Otherwise follow the system's preferred languages.
         let preferred = Locale.preferredLanguages
             .compactMap { Locale(identifier: $0) }
         for locale in preferred {
@@ -248,10 +292,32 @@ final class MicTranscriber: ObservableObject {
         return supported.first ?? Locale(identifier: "en-US")
     }
 
-    private static func ensureAssetsInstalled(for transcriber: SpeechTranscriber) async throws {
+    private func ensureAssetsInstalled(for transcriber: SpeechTranscriber) async throws {
         guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
+            dbg("assets: nothing to install (already available)")
             return
         }
+        dbg("assets: installing…")
         try await request.downloadAndInstall()
+        dbg("assets: install complete")
+    }
+
+    // MARK: - File debug log (/tmp/micmix-debug.log) — unified log is unreadable here
+
+    private static let dbgURL = URL(fileURLWithPath: "/tmp/micmix-debug.log")
+
+    private static func dbgReset() {
+        try? "=== MicMix session \(Date()) ===\n".data(using: .utf8)?.write(to: dbgURL)
+    }
+
+    private nonisolated func dbg(_ message: String) {
+        guard let data = "\(Date()) \(message)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: Self.dbgURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: Self.dbgURL)
+        }
     }
 }
