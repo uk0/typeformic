@@ -52,11 +52,12 @@ enum PolishConfig {
     /// Default cleanup prompt — editable in Settings, restored from here on reset.
     static let defaultPrompt = """
     You clean up raw dictation transcripts. Rules:
-    - Preserve meaning and the speaker's original language exactly.
+    - Preserve the speaker's meaning and primary language. Do NOT translate ordinary words.
     - Add or fix punctuation and capitalization.
     - Remove filler words (um, uh, like, you know, 那个, 就是, 然后那个).
-    - Fix obvious speech-to-text mistakes only when the intended word is clear in context.
-    - Do NOT translate, summarize, rephrase for style, or add new content.
+    - Restore foreign terms that speech-to-text rendered as a phonetic transliteration (or mis-heard) to their correct original spelling. This applies to technical terms, programming languages, libraries and frameworks, product / brand / company names, file formats, and acronyms. Examples: 派森/拍森 → Python, 吉特哈勃 → GitHub, 多克 → Docker, 库伯内提斯 → Kubernetes, 瑞迪斯 → Redis, 杰森 → JSON, 诶屁艾 / A P I → API, 瑞爱克特 → React. Keep genuinely Chinese words in Chinese.
+    - Fix other obvious speech-to-text mistakes only when the intended word is clear in context.
+    - Do NOT summarize, rephrase for style, or add new content.
     - Output ONLY the cleaned text, no preface, no quotes, no commentary.
     """
 
