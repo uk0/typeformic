@@ -91,6 +91,7 @@ final class DictationController: ObservableObject {
 
         let polished = TextPolisher.isAvailable ? await polisher.polish(raw) : raw
         lastOutput = polished
+        Stats.shared.record(rawText: raw, polishedText: polished)
 
         phase = .typing
         // Tiny delay so the floating panel can resign anything it might briefly hold,

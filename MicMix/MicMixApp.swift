@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -17,6 +18,9 @@ struct MicMixApp: App {
             }
             Button("Show / Hide Widget") {
                 delegate.togglePanel()
+            }
+            Button("Statistics…") {
+                delegate.showStats()
             }
             Button("Settings…") {
                 delegate.showSettings()
@@ -37,58 +41,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotKey = HotKey()
     private var panel: FloatingPanel?
     private var settingsWindow: NSWindow?
+    private var statsWindow: NSWindow?
+    private var cancellables = Set<AnyCancellable>()
+    private var hideWorkItem: DispatchWorkItem?
+    private var wasActive = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        showPanel()
+        // Hidden by default — only wakes on the hotkey / dictation activity.
+        createPanelIfNeeded()
 
         hotKey.register { [weak self] in
             guard let self else { return }
+            self.wakePanel()
             Task { await self.controller.toggle() }
-            self.showPanel()
+        }
+
+        controller.$phase
+            .receive(on: RunLoop.main)
+            .sink { [weak self] phase in self?.handlePhase(phase) }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Phase-driven visibility
+
+    private func handlePhase(_ phase: DictationController.Phase) {
+        switch phase {
+        case .preparing, .recording, .polishing, .typing:
+            wasActive = true
+            cancelHide()
+            wakePanel()
+        case .idle:
+            if wasActive { wasActive = false; scheduleHide(after: 1.6) }
+        case .error:
+            if wasActive { wasActive = false; scheduleHide(after: 3.0) }
         }
     }
 
+    // MARK: - Pill window
+
     func togglePanel() {
         if let panel, panel.isVisible {
-            panel.orderOut(nil)
+            hidePanel()
         } else {
-            showPanel()
+            wakePanel()
         }
+    }
+
+    private func createPanelIfNeeded() {
+        guard panel == nil else { return }
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 492, height: 90)) {
+            ContentView(controller: self.controller)
+        }
+        panel?.alphaValue = 0
+    }
+
+    private func wakePanel() {
+        createPanelIfNeeded()
+        cancelHide()
+        positionPanel()
+        guard let panel else { return }
+        if !panel.isVisible { panel.alphaValue = 0 }
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    private func hidePanel() {
+        guard let panel, panel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak panel] in
+            panel?.orderOut(nil)
+        })
+    }
+
+    private func scheduleHide(after seconds: TimeInterval) {
+        cancelHide()
+        let item = DispatchWorkItem { [weak self] in self?.hidePanel() }
+        hideWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
+    }
+
+    private func cancelHide() {
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
+    }
+
+    private func positionPanel() {
+        guard let panel, let screen = NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let size = panel.frame.size
+        let origin = NSPoint(x: visible.midX - size.width / 2,
+                             y: visible.minY + 40)
+        panel.setFrameOrigin(origin)
+    }
+
+    // MARK: - Aux windows
+
+    func showStats() {
+        if statsWindow == nil {
+            statsWindow = makeWindow(title: "MicMix Statistics",
+                                     size: NSSize(width: 460, height: 230),
+                                     content: StatsView())
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        statsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "MicMix Settings"
-            window.contentView = NSHostingView(rootView: SettingsView())
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
+            settingsWindow = makeWindow(title: "MicMix Settings",
+                                        size: NSSize(width: 520, height: 640),
+                                        content: SettingsView())
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func showPanel() {
-        if panel == nil {
-            let panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 180)) {
-                ContentView(controller: self.controller)
-            }
-            if let screen = NSScreen.main {
-                let frame = screen.visibleFrame
-                let size = panel.frame.size
-                panel.setFrameOrigin(NSPoint(x: frame.maxX - size.width - 20,
-                                             y: frame.maxY - size.height - 20))
-            }
-            self.panel = panel
-        }
-        panel?.orderFrontRegardless()
+    private func makeWindow<Content: View>(title: String, size: NSSize, content: Content) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = title
+        window.contentView = NSHostingView(rootView: content)
+        window.isReleasedWhenClosed = false
+        window.center()
+        return window
     }
 }

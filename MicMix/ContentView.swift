@@ -2,6 +2,8 @@
 //  ContentView.swift
 //  MicMix
 //
+//  Compact "wake" pill shown at the bottom-center of the screen while dictating.
+//
 
 import SwiftUI
 
@@ -9,42 +11,51 @@ struct ContentView: View {
     @ObservedObject var controller: DictationController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                statusDot
+        HStack(spacing: 12) {
+            indicator
+
+            VStack(alignment: .leading, spacing: 1) {
                 Text(statusText)
-                    .font(.system(.callout, design: .rounded).weight(.medium))
-                Spacer()
-                Text("⌃⌥M")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 4))
-            }
-
-            ScrollView {
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    .foregroundStyle(tint)
                 Text(displayText)
-                    .font(.system(.body))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                    .font(.system(.callout))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
             }
-            .frame(minHeight: 60, maxHeight: 120)
-            .padding(8)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+
+            Spacer(minLength: 4)
+
+            Text("⌃⌥M")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .frame(width: 360)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(width: 460, height: 58, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+        .padding(16)
     }
 
-    private var statusDot: some View {
-        Circle()
-            .fill(dotColor)
-            .frame(width: 8, height: 8)
-            .opacity(controller.phase == .recording ? 1 : 0.6)
+    private var indicator: some View {
+        ZStack {
+            Circle()
+                .fill(tint.opacity(0.18))
+                .frame(width: 32, height: 32)
+            Image(systemName: iconName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .symbolEffect(.pulse, options: .repeating, isActive: controller.phase == .recording)
+        }
     }
 
-    private var dotColor: Color {
+    private var tint: Color {
         switch controller.phase {
         case .preparing: return .orange
         case .recording: return .red
@@ -55,14 +66,25 @@ struct ContentView: View {
         }
     }
 
+    private var iconName: String {
+        switch controller.phase {
+        case .preparing: return "arrow.down.circle"
+        case .recording: return "mic.fill"
+        case .polishing: return "wand.and.stars"
+        case .typing: return "keyboard"
+        case .error: return "exclamationmark.triangle.fill"
+        case .idle: return "mic"
+        }
+    }
+
     private var statusText: String {
         switch controller.phase {
-        case .idle: return "Ready"
-        case .preparing: return "Preparing…"
-        case .recording: return "Listening…"
-        case .polishing: return "Polishing…"
-        case .typing: return "Inserting…"
-        case .error(let message): return message
+        case .idle: return "READY"
+        case .preparing: return "PREPARING"
+        case .recording: return "LISTENING"
+        case .polishing: return "POLISHING"
+        case .typing: return "INSERTING"
+        case .error: return "ERROR"
         }
     }
 
@@ -71,15 +93,16 @@ struct ContentView: View {
         case .preparing:
             return "Preparing language model…"
         case .recording, .polishing:
-            return controller.liveText.isEmpty ? "Start speaking…" : controller.liveText
+            return controller.liveText.isEmpty ? "Speak now…" : controller.liveText
         case .typing, .idle:
             return controller.lastOutput.isEmpty ? "Press ⌃⌥M to dictate." : controller.lastOutput
-        case .error:
-            return "Try again with ⌃⌥M."
+        case .error(let message):
+            return message
         }
     }
 }
 
 #Preview {
     ContentView(controller: DictationController())
+        .frame(width: 492, height: 90)
 }
