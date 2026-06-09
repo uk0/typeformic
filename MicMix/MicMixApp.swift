@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
@@ -15,6 +16,9 @@ struct MicMixApp: App {
         MenuBarExtra("MicMix", systemImage: "mic.fill") {
             Button("Toggle Dictation  ⌃⌥M") {
                 Task { await delegate.controller.toggle() }
+            }
+            Button("Translate Input  ⌃⌥T") {
+                delegate.translateOverlay.toggle()
             }
             Button("Show / Hide Widget") {
                 delegate.togglePanel()
@@ -38,7 +42,9 @@ struct MicMixApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = DictationController()
-    private let hotKey = HotKey()
+    let translateOverlay = TranslateOverlayController()
+    private let dictationHotKey = HotKey()
+    private let translateHotKey = HotKey()
     private var panel: FloatingPanel?
     private var settingsWindow: NSWindow?
     private var statsWindow: NSWindow?
@@ -52,10 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hidden by default — only wakes on the hotkey / dictation activity.
         createPanelIfNeeded()
 
-        hotKey.register { [weak self] in
+        dictationHotKey.register(id: 1) { [weak self] in
             guard let self else { return }
             self.wakePanel()
             Task { await self.controller.toggle() }
+        }
+        translateHotKey.register(keyCode: UInt32(kVK_ANSI_T),
+                                 modifiers: UInt32(controlKey | optionKey),
+                                 id: 2) { [weak self] in
+            self?.translateOverlay.toggle()
         }
 
         controller.$phase

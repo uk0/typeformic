@@ -75,6 +75,35 @@ final class TextPolisher {
         }
     }
 
+    // MARK: - One-shot translation (for the Translate Input overlay)
+
+    /// Translates `text` (typically typed Chinese) into English in the current
+    /// style. Returns "" when no engine is available or the call fails.
+    static func translate(_ text: String) async -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let config = PolishConfig.current
+        let prompt = """
+        Translate the user's Chinese text into natural English. Preserve meaning, not literal word order. Keep technical terms (Python, GitHub, Docker, JSON, API, …) in English — never localize them. Output ONLY the translation, with no preface, no quotes, no commentary, no markdown.
+
+        \(config.style.directive)
+        """
+
+        if config.engine == .remote, config.usesRemote {
+            if let content = try? await remoteRequest(text: trimmed, systemPrompt: prompt, config: config) {
+                return content.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        if SystemLanguageModel.default.availability == .available {
+            let session = LanguageModelSession { prompt }
+            if let response = try? await session.respond(to: trimmed) {
+                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return ""
+    }
+
     /// Sends a tiny round-trip and returns a human-readable success/failure line
     /// for the Settings "Test Connection" button. Uses a minimal system prompt
     /// — not the cleanup prompt — so it doesn't have to match the dual format.
