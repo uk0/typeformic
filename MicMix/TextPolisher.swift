@@ -79,29 +79,133 @@ final class TextPolisher {
 
     /// Translates `text` (typically typed Chinese) into English in the current
     /// style. Returns "" when no engine is available or the call fails.
+    /// Strips common LLM artifacts (prefixes like "Translation:", wrapping
+    /// quotes, markdown bold) post-hoc so misbehaving models still yield a
+    /// clean line.
     static func translate(_ text: String) async -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
         let config = PolishConfig.current
         let prompt = """
-        Translate the user's Chinese text into natural English. Preserve meaning, not literal word order. Keep technical terms (Python, GitHub, Docker, JSON, API, …) in English — never localize them. Output ONLY the translation, with no preface, no quotes, no commentary, no markdown.
+        You are a Chinese→English translation function. You produce ONLY the English translation of the user's input, and nothing else.
 
-        \(config.style.directive)
+        Hard rules — every rule must be followed; violating any of them counts as a failed response:
+        - Output exactly one English sentence (or paragraph if the input is a paragraph). No additional sentences.
+        - Do NOT prefix the output with anything. Forbidden prefixes include (case-insensitive): "Translation:", "English:", "Output:", "Translated:", "Result:", "Here is", "Here's", "The translation is", "In English", any "**...**" header.
+        - Do NOT wrap the output in any kind of quotes: no "...", '...', `...`, “...”, „...", «...», 「...」, 『...』.
+        - Do NOT add markdown formatting (no **bold**, *italic*, _underline_, # headers, code fences, bullet lists, numbered lists).
+        - Do NOT add notes, explanations, alternatives, disclaimers, or commentary before, after, or in parentheses.
+        - Do NOT echo the original Chinese.
+        - Keep technical terms in English exactly as written (Python, GitHub, Docker, Kubernetes, JSON, API, React, Redis, …). Never localize them.
+        - Preserve meaning faithfully; favor natural English over literal word-for-word mapping.
+        - If the input is already English, return it unchanged.
+        - Never refuse, never apologize, never ask clarifying questions. If unsure, produce your best direct translation.
+
+        Style of the translation: \(config.style.directive)
+
+        Examples (illustrative — your output must match this exact shape, raw text only):
+
+        Input: 我用 Python 写了一个 GitHub Actions 的部署脚本。
+        Output: I wrote a deployment script for GitHub Actions in Python.
+
+        Input: 今天下午我们开个会聊一下需求,顺便对一下下周的排期。
+        Output: Let's have a meeting this afternoon to go over the requirements and align on next week's schedule.
+
+        Input: 这个接口的响应时间从 120 毫秒降到了 8 毫秒。
+        Output: The endpoint's response time dropped from 120ms to 8ms.
+
+        Input: 帮我把这段代码重构一下,顺手加点日志。
+        Output: Refactor this code for me and add some logging while you're at it.
+
+        Now translate the user's next message following ALL the rules above.
         """
 
+        var raw: String? = nil
         if config.engine == .remote, config.usesRemote {
-            if let content = try? await remoteRequest(text: trimmed, systemPrompt: prompt, config: config) {
-                return content.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+            raw = try? await remoteRequest(text: trimmed, systemPrompt: prompt, config: config)
         }
-        if SystemLanguageModel.default.availability == .available {
+        if raw == nil, SystemLanguageModel.default.availability == .available {
             let session = LanguageModelSession { prompt }
             if let response = try? await session.respond(to: trimmed) {
-                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                raw = response.content
             }
         }
-        return ""
+        guard let raw else { return "" }
+        return sanitizeTranslation(raw)
+    }
+
+    /// Strips common LLM-output artifacts that the strict prompt should already
+    /// have prevented, but which still leak through some models.
+    static func sanitizeTranslation(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip surrounding code fences (``` … ``` or ```lang … ```).
+        if text.hasPrefix("```") {
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.count >= 2,
+               let last = lines.last, last.hasPrefix("```") {
+                text = lines.dropFirst().dropLast().joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        // Strip leading bold/italic markdown wrappers, repeated until stable.
+        let leadingTokens = ["**", "__", "*", "_"]
+        var changed = true
+        while changed {
+            changed = false
+            for tok in leadingTokens where text.hasPrefix(tok) && text.hasSuffix(tok) && text.count > tok.count * 2 {
+                text = String(text.dropFirst(tok.count).dropLast(tok.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
+                break
+            }
+        }
+
+        // Strip leading "Translation:", "Here is …", "**English:** …" etc.
+        let prefixPatterns = [
+            "translation:", "translated:", "english:", "output:", "result:",
+            "here is the translation:", "here is the translated text:",
+            "here's the translation:", "here is the english:", "here's the english:",
+            "the translation is:", "translation in english:", "in english:",
+            "translation (developer style):", "translation (casual style):",
+            "translation (formal style):", "translation (concise style):",
+        ]
+        changed = true
+        while changed {
+            changed = false
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Drop a single leading markdown bullet/heading marker if present.
+            for marker in ["- ", "* ", "> ", "# ", "## ", "### "] where text.hasPrefix(marker) {
+                text = String(text.dropFirst(marker.count))
+                changed = true
+            }
+            let lower = text.lowercased()
+            for pat in prefixPatterns where lower.hasPrefix(pat) {
+                text = String(text.dropFirst(pat.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                changed = true
+                break
+            }
+        }
+
+        // Peel matching wrapping quotes (straight, smart, French, Chinese), repeatedly.
+        let quotePairs: [(Character, Character)] = [
+            ("\"", "\""), ("'", "'"), ("`", "`"),
+            ("\u{201C}", "\u{201D}"),  // “ ”
+            ("\u{2018}", "\u{2019}"),  // ‘ ’
+            ("\u{201E}", "\u{201D}"),  // „ ”
+            ("«", "»"), ("「", "」"), ("『", "』"),
+        ]
+        while let first = text.first, let last = text.last,
+              quotePairs.contains(where: { $0.0 == first && $0.1 == last }),
+              text.count >= 2 {
+            text = String(text.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return text
     }
 
     /// Sends a tiny round-trip and returns a human-readable success/failure line
