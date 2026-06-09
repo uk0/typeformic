@@ -16,6 +16,8 @@ struct SettingsView: View {
     @AppStorage(PolishConfig.Keys.apiKey) private var apiKey = ""
     @AppStorage(PolishConfig.Keys.model) private var model = ""
     @AppStorage(PolishConfig.Keys.prompt) private var prompt = PolishConfig.defaultPrompt
+    @AppStorage(PolishConfig.Keys.style) private var style = PolishConfig.Style.developer
+    @AppStorage(PolishConfig.Keys.outputLanguage) private var outputLanguage = PolishConfig.OutputLanguage.chinese
     @State private var locales: [Locale] = []
     @State private var testResult = ""
     @State private var testing = false
@@ -30,6 +32,24 @@ struct SettingsView: View {
                     }
                 }
                 Text("Speech-recognition language. First use of a language downloads its model.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Output") {
+                Picker("Type at cursor", selection: $outputLanguage) {
+                    ForEach(PolishConfig.OutputLanguage.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("Style", selection: $style) {
+                    ForEach(PolishConfig.Style.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("The wake pill always shows cleaned Chinese on top and the English translation below. This picks which one is typed at the cursor and the tone used for both.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

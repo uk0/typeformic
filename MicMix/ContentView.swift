@@ -3,6 +3,7 @@
 //  MicMix
 //
 //  Compact "wake" pill shown at the bottom-center of the screen while dictating.
+//  Two text lines: cleaned Chinese on top, English translation below.
 //
 
 import SwiftUI
@@ -14,15 +15,22 @@ struct ContentView: View {
         HStack(spacing: 12) {
             indicator
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(statusText)
                     .font(.system(.caption2, design: .rounded).weight(.semibold))
                     .foregroundStyle(tint)
-                Text(displayText)
+                Text(chineseText)
                     .font(.system(.callout))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.head)
+                // English subline — kept rendered (with a space fallback) so the
+                // pill height doesn't bounce between phases.
+                Text(englishText.isEmpty ? " " : englishText)
+                    .font(.system(.caption))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
             Spacer(minLength: 4)
@@ -33,7 +41,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(width: 460, height: 58, alignment: .leading)
+        .frame(width: 460, height: 78, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
         .overlay(
             RoundedRectangle(cornerRadius: 18)
@@ -88,21 +96,36 @@ struct ContentView: View {
         }
     }
 
-    private var displayText: String {
+    /// Line 1 — the Chinese text the speaker actually said (raw → cleaned).
+    private var chineseText: String {
         switch controller.phase {
         case .preparing:
             return "Preparing language model…"
-        case .recording, .polishing:
+        case .recording:
             return controller.liveText.isEmpty ? "Speak now…" : controller.liveText
+        case .polishing:
+            return controller.liveText.isEmpty ? "Polishing…" : controller.liveText
         case .typing, .idle:
-            return controller.lastOutput.isEmpty ? "Press ⌃⌥M to dictate." : controller.lastOutput
+            return controller.liveText.isEmpty ? "Press ⌃⌥M to dictate." : controller.liveText
         case .error(let message):
             return message
+        }
+    }
+
+    /// Line 2 — the English translation (when available).
+    private var englishText: String {
+        switch controller.phase {
+        case .polishing:
+            return controller.liveEnglish.isEmpty ? "Translating…" : controller.liveEnglish
+        case .typing, .idle:
+            return controller.liveEnglish
+        case .preparing, .recording, .error:
+            return ""
         }
     }
 }
 
 #Preview {
     ContentView(controller: DictationController())
-        .frame(width: 492, height: 90)
+        .frame(width: 492, height: 110)
 }

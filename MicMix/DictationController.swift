@@ -21,7 +21,12 @@ final class DictationController: ObservableObject {
     }
 
     @Published var phase: Phase = .idle
+    /// Line 1 of the wake pill — raw Chinese during recording, cleaned Chinese after polishing.
     @Published var liveText: String = ""
+    /// Line 2 of the wake pill — English translation, populated by the polish step.
+    @Published var liveEnglish: String = ""
+    /// The text actually injected at the cursor on the last completed dictation
+    /// (may equal `liveText` or `liveEnglish` depending on the output language).
     @Published var lastOutput: String = ""
 
     let transcriber = MicTranscriber()
@@ -62,6 +67,7 @@ final class DictationController: ObservableObject {
             return
         }
         liveText = ""
+        liveEnglish = ""
         transcriber.onSilence = { [weak self] in
             Task { await self?.autoFinish() }
         }
@@ -89,15 +95,32 @@ final class DictationController: ObservableObject {
             return
         }
 
-        let polished = TextPolisher.isAvailable ? await polisher.polish(raw) : raw
-        lastOutput = polished
-        Stats.shared.record(rawText: raw, polishedText: polished)
+        let result: PolishResult = TextPolisher.isAvailable
+            ? await polisher.polish(raw)
+            : PolishResult(chinese: raw, english: "")
+
+        // Update the panel: line 1 = cleaned Chinese, line 2 = English translation.
+        liveText = result.chinese
+        liveEnglish = result.english
+
+        // Pick what to actually type based on the output-language setting.
+        // Fall back to Chinese if English is empty (e.g. on-device model didn't
+        // emit a second line, or the engine failed mid-way).
+        let config = PolishConfig.current
+        let target: String = {
+            if config.outputLanguage == .english, !result.english.isEmpty {
+                return result.english
+            }
+            return result.chinese
+        }()
+        lastOutput = target
+        Stats.shared.record(rawText: raw, polishedText: result.chinese)
 
         phase = .typing
         // Tiny delay so the floating panel can resign anything it might briefly hold,
         // and the user's previously-frontmost app receives the keystrokes.
         try? await Task.sleep(nanoseconds: 80_000_000)
-        KeystrokeInjector.type(polished)
+        KeystrokeInjector.type(target)
 
         phase = .idle
     }

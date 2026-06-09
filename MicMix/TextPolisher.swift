@@ -2,21 +2,30 @@
 //  TextPolisher.swift
 //  MicMix
 //
-//  Cleans up dictated speech — adds punctuation, drops filler words, fixes obvious
-//  recognition slips — while preserving meaning and the speaker's language.
+//  Cleans up a raw Chinese dictation transcript AND produces a faithful English
+//  translation in a single model call, then parses the two-line output.
 //
-//  Uses the remote API (OpenAI-compatible or Anthropic) configured in Settings when
-//  selected, and otherwise Apple's on-device Foundation Models.
+//  Uses the remote API (OpenAI-compatible or Anthropic) configured in Settings
+//  when selected, and otherwise Apple's on-device Foundation Models.
 //
 
 import FoundationModels
 import Foundation
 
+/// Result of one polish round: the cleaned Chinese (line 1 in the panel) and
+/// the English translation (line 2 in the panel).
+struct PolishResult {
+    let chinese: String
+    let english: String
+
+    static let empty = PolishResult(chinese: "", english: "")
+}
+
 @MainActor
 final class TextPolisher {
-    func polish(_ raw: String) async -> String {
+    func polish(_ raw: String) async -> PolishResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
+        guard !trimmed.isEmpty else { return .empty }
 
         let config = PolishConfig.current
         if config.engine == .remote, config.usesRemote,
@@ -24,9 +33,11 @@ final class TextPolisher {
             return remote
         }
         if SystemLanguageModel.default.availability == .available {
-            return await Self.polishOnDevice(trimmed, prompt: config.prompt)
+            return await Self.polishOnDevice(trimmed, systemPrompt: config.fullSystemPrompt)
         }
-        return trimmed
+        // No polishing engine available — pass the raw text through as the
+        // cleaned line; English is left empty.
+        return PolishResult(chinese: trimmed, english: "")
     }
 
     /// True when polishing can run at all — a remote API is configured, or the
@@ -39,30 +50,34 @@ final class TextPolisher {
 
     // MARK: - On-device (Foundation Models)
 
-    private static func polishOnDevice(_ text: String, prompt: String) async -> String {
-        let session = LanguageModelSession { prompt }
+    private static func polishOnDevice(_ text: String, systemPrompt: String) async -> PolishResult {
+        let session = LanguageModelSession { systemPrompt }
         do {
             let response = try await session.respond(to: text)
-            return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return parseDual(response.content, fallback: text)
         } catch {
-            return text
+            return PolishResult(chinese: text, english: "")
         }
     }
 
     // MARK: - Remote (OpenAI-compatible or Anthropic)
 
-    private static func polishRemote(_ text: String, config: PolishConfig.Snapshot) async -> String? {
+    private static func polishRemote(_ text: String, config: PolishConfig.Snapshot) async -> PolishResult? {
         do {
-            let content = try await remoteRequest(text: text, systemPrompt: config.prompt, config: config)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return content.isEmpty ? nil : content
+            let content = try await remoteRequest(
+                text: text,
+                systemPrompt: config.fullSystemPrompt,
+                config: config
+            )
+            return parseDual(content, fallback: text)
         } catch {
             return nil
         }
     }
 
     /// Sends a tiny round-trip and returns a human-readable success/failure line
-    /// for the Settings "Test Connection" button.
+    /// for the Settings "Test Connection" button. Uses a minimal system prompt
+    /// — not the cleanup prompt — so it doesn't have to match the dual format.
     static func testConnection(config: PolishConfig.Snapshot) async -> String {
         guard config.usesRemote else {
             return "✗ Fill in Base URL, API Key, and Model first."
@@ -78,6 +93,60 @@ final class TextPolisher {
             return "✗ \(error.localizedDescription)"
         }
     }
+
+    // MARK: - Output parsing
+
+    /// Parses the model's "CLEANED: …\nENGLISH: …" output. Tolerates extra blank
+    /// lines, multi-line values, leading bullets/quotes, and lower-case labels.
+    /// Falls back to treating the whole output as the cleaned line when neither
+    /// label is found.
+    static func parseDual(_ text: String, fallback: String) -> PolishResult {
+        var chineseLines: [String] = []
+        var englishLines: [String] = []
+        var section: Section = .none
+
+        for raw in text.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if let value = strip(prefix: "CLEANED:", from: line) {
+                section = .chinese
+                if !value.isEmpty { chineseLines.append(value) }
+            } else if let value = strip(prefix: "ENGLISH:", from: line) {
+                section = .english
+                if !value.isEmpty { englishLines.append(value) }
+            } else {
+                switch section {
+                case .chinese: chineseLines.append(line)
+                case .english: englishLines.append(line)
+                case .none:    break
+                }
+            }
+        }
+
+        let zh = chineseLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let en = englishLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if zh.isEmpty && en.isEmpty {
+            // Model ignored the format. Treat the whole reply as the cleaned text.
+            let whole = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return PolishResult(chinese: whole.isEmpty ? fallback : whole, english: "")
+        }
+        return PolishResult(chinese: zh.isEmpty ? fallback : zh, english: en)
+    }
+
+    private enum Section { case none, chinese, english }
+
+    /// If `line` begins with `prefix` (case-insensitive, optionally after a
+    /// quote/bullet), returns the trimmed value after the colon. Otherwise nil.
+    private static func strip(prefix: String, from line: String) -> String? {
+        let stripped = line.drop(while: { "*-•>「" .contains($0) || $0.isWhitespace })
+        let lower = stripped.lowercased()
+        guard lower.hasPrefix(prefix.lowercased()) else { return nil }
+        let after = stripped.dropFirst(prefix.count)
+        return after.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Remote request plumbing
 
     private struct RemoteError: LocalizedError {
         let message: String
