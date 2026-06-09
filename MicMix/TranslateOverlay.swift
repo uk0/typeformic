@@ -87,8 +87,8 @@ final class TranslateOverlayController: ObservableObject {
     private func ensurePanel() -> TranslateOverlayPanel {
         if let panel { return panel }
         let p = TranslateOverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 96),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 76),
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -96,10 +96,16 @@ final class TranslateOverlayController: ObservableObject {
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = false
+        p.hasShadow = true
         p.isMovableByWindowBackground = false
         p.hidesOnDeactivate = true
-        p.contentView = NSHostingView(rootView: TranslateOverlayView(controller: self))
+
+        let hosting = NSHostingView(rootView: TranslateOverlayView(controller: self))
+        // Without this, the hosting view's backing layer renders an opaque
+        // white margin around the rounded material — visible past the capsule.
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        p.contentView = hosting
         panel = p
         return p
     }
@@ -163,13 +169,14 @@ private struct TranslateOverlayView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        // Fills the panel content area exactly — so the rounded material is the
+        // whole visible window and the window's shadow handles the soft edge.
+        .frame(width: 460, height: 76)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.40), radius: 18, y: 8)
-        .padding(8)
         .onAppear { fieldFocused = true }
     }
 }
