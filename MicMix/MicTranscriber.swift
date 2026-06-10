@@ -7,9 +7,10 @@
 //  text when stopped.
 //
 
-import AVFoundation
+@preconcurrency import AVFoundation
 import Combine
 import Foundation
+import os
 import Speech
 @preconcurrency import CoreMedia
 
@@ -62,15 +63,15 @@ final class MicTranscriber: ObservableObject {
     func start() async throws {
         guard !isRecording else { return }
         resetState()
-        Self.dbgReset()
+        trace("— dictation session start —", resetFile: true)
 
         let supported = await SpeechTranscriber.supportedLocales
-        dbg("supportedLocales(\(supported.count)): \(supported.map { $0.identifier }.joined(separator: ","))")
+        trace("supportedLocales(\(supported.count)): \(supported.map { $0.identifier }.joined(separator: ","))")
         let installed = await SpeechTranscriber.installedLocales
-        dbg("installedLocales(\(installed.count)): \(installed.map { $0.identifier }.joined(separator: ","))")
+        trace("installedLocales(\(installed.count)): \(installed.map { $0.identifier }.joined(separator: ","))")
 
         let locale = await Self.preferredSupportedLocale()
-        dbg("chosen locale: \(locale.identifier)")
+        trace("chosen locale: \(locale.identifier)")
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
@@ -79,14 +80,14 @@ final class MicTranscriber: ObservableObject {
         )
         self.transcriber = transcriber
 
-        dbg("ensuring assets…")
+        trace("ensuring assets…")
         do {
             try await ensureAssetsInstalled(for: transcriber)
         } catch {
-            dbg("ASSET ERROR: \(error)")
+            trace("ASSET ERROR: \(error)")
             throw error
         }
-        dbg("assets ready")
+        trace("assets ready")
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
@@ -102,26 +103,26 @@ final class MicTranscriber: ObservableObject {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     self.resultCount += 1
-                    self.dbg("result #\(self.resultCount) final=\(result.isFinal): \(text)")
-                    await self.append(result: result)
+                    self.traceContent("result #\(self.resultCount) final=\(result.isFinal): \(text)")
+                    self.append(result: result)
                 }
-                self.dbg("results stream ended (total=\(self.resultCount))")
+                self.trace("results stream ended (total=\(self.resultCount))")
             } catch {
-                self.dbg("RESULTS ERROR: \(error)")
-                await self.report(error: error)
+                self.trace("RESULTS ERROR: \(error)")
+                self.report(error: error)
             }
         }
 
         try await analyzer.start(inputSequence: stream)
         isRecording = true
         statusMessage = "Listening…"
-        dbg("analyzer started — listening")
+        trace("analyzer started — listening")
     }
 
     func stop() async -> String {
         guard isRecording else { return finalText() }
         isRecording = false
-        dbg("stopping. peakLevel=\(peakLevel) results=\(resultCount) phrases=\(phrases.count)")
+        trace("stopping. peakLevel=\(peakLevel) results=\(resultCount) phrases=\(phrases.count)")
         statusMessage = "Finalizing…"
 
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -133,7 +134,7 @@ final class MicTranscriber: ObservableObject {
         do {
             try await analyzer?.finalizeAndFinishThroughEndOfInput()
         } catch {
-            dbg("FINALIZE ERROR: \(error)")
+            trace("FINALIZE ERROR: \(error)")
             report(error: error)
         }
         await resultsTask?.value
@@ -142,7 +143,8 @@ final class MicTranscriber: ObservableObject {
         transcriber = nil
         statusMessage = ""
         let out = finalText()
-        dbg("final text(\(out.count) chars): \(out)")
+        trace("final text: \(out.count) chars")
+        traceContent("final text: \(out)")
         return out
     }
 
@@ -182,13 +184,13 @@ final class MicTranscriber: ObservableObject {
         guard isRecording else { return }
         peakLevel = max(peakLevel, level)
         if level >= Self.voiceThreshold {
-            if !voiceDetected { dbg("VAD: speech onset (level=\(level))") }
+            if !voiceDetected { trace("VAD: speech onset (level=\(level))") }
             voiceDetected = true
             silenceAccumulated = 0
         } else if voiceDetected {
             silenceAccumulated += bufferDuration
             if silenceAccumulated >= Self.silenceTimeout {
-                dbg("VAD: trailing silence — auto-finish")
+                trace("VAD: trailing silence — auto-finish")
                 voiceDetected = false
                 silenceAccumulated = 0
                 onSilence?()
@@ -224,7 +226,7 @@ final class MicTranscriber: ObservableObject {
                              channels: 1,
                              interleaved: false)!
 
-        dbg("formats: input=\(Int(inputFormat.sampleRate))Hz/\(inputFormat.channelCount)ch analyzer=\(Int(analyzerFormat.sampleRate))Hz/\(analyzerFormat.channelCount)ch convert=\(inputFormat != analyzerFormat)")
+        trace("formats: input=\(Int(inputFormat.sampleRate))Hz/\(inputFormat.channelCount)ch analyzer=\(Int(analyzerFormat.sampleRate))Hz/\(analyzerFormat.channelCount)ch convert=\(inputFormat != analyzerFormat)")
         let converter: AVAudioConverter? = (inputFormat == analyzerFormat)
             ? nil
             : AVAudioConverter(from: inputFormat, to: analyzerFormat)
@@ -294,30 +296,51 @@ final class MicTranscriber: ObservableObject {
 
     private func ensureAssetsInstalled(for transcriber: SpeechTranscriber) async throws {
         guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
-            dbg("assets: nothing to install (already available)")
+            trace("assets: nothing to install (already available)")
             return
         }
-        dbg("assets: installing…")
+        trace("assets: installing…")
         try await request.downloadAndInstall()
-        dbg("assets: install complete")
+        trace("assets: install complete")
     }
 
-    // MARK: - File debug log (/tmp/micmix-debug.log) — unified log is unreadable here
+    // MARK: - Diagnostics
 
-    private static let dbgURL = URL(fileURLWithPath: "/tmp/micmix-debug.log")
+    private nonisolated static let log = Logger(subsystem: "me.firsh.MicMix", category: "transcribe")
 
-    private static func dbgReset() {
-        try? "=== MicMix session \(Date()) ===\n".data(using: .utf8)?.write(to: dbgURL)
+    /// Structural diagnostics — locale choice, asset state, formats, VAD events.
+    /// Safe to keep public in the unified log; never contains user speech.
+    private nonisolated func trace(_ message: String, resetFile: Bool = false) {
+        Self.log.notice("\(message, privacy: .public)")
+        Self.mirrorToFile(message, reset: resetFile)
     }
 
-    private nonisolated func dbg(_ message: String) {
+    /// Diagnostics that contain what the user said. Marked private so the
+    /// system log store never persists transcript content in release builds.
+    private nonisolated func traceContent(_ message: String) {
+        Self.log.debug("\(message, privacy: .private)")
+        Self.mirrorToFile(message, reset: false)
+    }
+
+    /// Optional plain-file mirror for environments where `log show` is not
+    /// available. DEBUG builds only, and only when MICMIX_FILELOG=1 is set —
+    /// release builds never write dictation diagnostics to disk.
+    private nonisolated static func mirrorToFile(_ message: String, reset: Bool) {
+#if DEBUG
+        guard ProcessInfo.processInfo.environment["MICMIX_FILELOG"] == "1" else { return }
+        let url = URL(fileURLWithPath: "/tmp/micmix-debug.log")
         guard let data = "\(Date()) \(message)\n".data(using: .utf8) else { return }
-        if let handle = try? FileHandle(forWritingTo: Self.dbgURL) {
+        if reset {
+            try? data.write(to: url)
+            return
+        }
+        if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
-            try? data.write(to: Self.dbgURL)
+            try? data.write(to: url)
         }
+#endif
     }
 }

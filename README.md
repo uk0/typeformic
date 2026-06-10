@@ -110,7 +110,7 @@ Menu bar → **Settings…** (⌘,):
 - **Cleanup Prompt** — the instructions used to tidy the transcript; editable,
   with reset-to-default.
 
-API keys are stored locally in `UserDefaults`.
+API keys are stored in the macOS Keychain.
 
 ## Usage
 

@@ -5,6 +5,7 @@
 //  Settings window: configure an OpenAI-compatible model API and the cleanup prompt.
 //
 
+import ServiceManagement
 import Speech
 import SwiftUI
 
@@ -13,17 +14,34 @@ struct SettingsView: View {
     @AppStorage(PolishConfig.Keys.engine) private var engine = PolishConfig.Engine.onDevice
     @AppStorage(PolishConfig.Keys.provider) private var provider = PolishConfig.Provider.openai
     @AppStorage(PolishConfig.Keys.baseURL) private var baseURL = ""
-    @AppStorage(PolishConfig.Keys.apiKey) private var apiKey = ""
     @AppStorage(PolishConfig.Keys.model) private var model = ""
     @AppStorage(PolishConfig.Keys.prompt) private var prompt = PolishConfig.defaultPrompt
     @AppStorage(PolishConfig.Keys.style) private var style = PolishConfig.Style.developer
     @AppStorage(PolishConfig.Keys.outputLanguage) private var outputLanguage = PolishConfig.OutputLanguage.chinese
+    // Credentials live in the Keychain, not UserDefaults — so no @AppStorage here.
+    @State private var apiKey = PolishConfig.storedAPIKey
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var locales: [Locale] = []
     @State private var testResult = ""
     @State private var testing = false
 
     var body: some View {
         Form {
+            Section("General") {
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enable in
+                        do {
+                            if enable {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    }
+            }
+
             Section("Dictation") {
                 Picker("Language", selection: $dictationLocale) {
                     Text("Auto (follow system)").tag("")
@@ -72,6 +90,9 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 TextField("Base URL", text: $baseURL, prompt: Text(verbatim: provider.defaultBaseURL))
                 SecureField("API Key", text: $apiKey, prompt: Text(verbatim: provider == .anthropic ? "sk-ant-…" : "sk-…"))
+                    .onChange(of: apiKey) { _, newValue in
+                        PolishConfig.setAPIKey(newValue)
+                    }
                 TextField("Model", text: $model, prompt: Text(verbatim: provider.modelPlaceholder))
                 HStack(spacing: 8) {
                     Button(testing ? "Testing…" : "Test Connection") { runTest() }
@@ -84,7 +105,7 @@ struct SettingsView: View {
                             .lineLimit(3)
                     }
                 }
-                Text("Used when “Remote API” is selected. Falls back to on-device if unset or unreachable.")
+                Text("Used when “Remote API” is selected. Falls back to on-device if unset or unreachable. The API key is stored in the macOS Keychain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -101,7 +122,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 680)
         .task {
             locales = (await SpeechTranscriber.supportedLocales)
                 .sorted { $0.identifier < $1.identifier }

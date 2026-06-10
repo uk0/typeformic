@@ -164,7 +164,32 @@ enum PolishConfig {
         }
     }
 
-    /// Reads the current settings from UserDefaults, applying defaults.
+    /// The API key lives in the Keychain (platform convention for credentials).
+    /// Reading migrates any legacy plaintext value out of UserDefaults once.
+    static var storedAPIKey: String {
+        if let value = KeychainStore.string(forKey: Keys.apiKey) {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let defaults = UserDefaults.standard
+        if let legacy = defaults.string(forKey: Keys.apiKey), !legacy.isEmpty {
+            KeychainStore.set(legacy, forKey: Keys.apiKey)
+            defaults.removeObject(forKey: Keys.apiKey)
+            return legacy.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
+    }
+
+    static func setAPIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            KeychainStore.delete(key: Keys.apiKey)
+        } else {
+            KeychainStore.set(trimmed, forKey: Keys.apiKey)
+        }
+    }
+
+    /// Reads the current settings from UserDefaults (key from the Keychain),
+    /// applying defaults.
     static var current: Snapshot {
         let defaults = UserDefaults.standard
         func trimmed(_ key: String) -> String {
@@ -179,7 +204,7 @@ enum PolishConfig {
             engine: engine,
             provider: provider,
             baseURL: trimmed(Keys.baseURL),
-            apiKey: trimmed(Keys.apiKey),
+            apiKey: storedAPIKey,
             model: trimmed(Keys.model),
             prompt: (storedPrompt?.isEmpty == false) ? storedPrompt! : defaultPrompt,
             style: style,

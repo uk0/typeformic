@@ -404,7 +404,9 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 uk0 — MIT License";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MicMix uses the microphone to capture your voice for dictation.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MicMix uses on-device speech recognition to transcribe your dictation into text.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -439,7 +441,9 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 uk0 — MIT License";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MicMix uses the microphone to capture your voice for dictation.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MicMix uses on-device speech recognition to transcribe your dictation into text.";
 				LD_RUNPATH_SEARCH_PATHS = (

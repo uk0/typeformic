@@ -31,6 +31,10 @@ struct MicMixApp: App {
             }
             .keyboardShortcut(",", modifiers: .command)
             Divider()
+            Button("About MicMix") {
+                delegate.showAbout()
+            }
+            Divider()
             Button("Quit MicMix") {
                 NSApplication.shared.terminate(nil)
             }
@@ -53,7 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var wasActive = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // Accessory behavior comes from LSUIElement in Info.plist, so the app
+        // never flashes a Dock icon at launch.
+
+        // One-time migration of a legacy plaintext API key into the Keychain.
+        _ = PolishConfig.storedAPIKey
 
         // Hidden by default — only wakes on the hotkey / dictation activity.
         createPanelIfNeeded()
@@ -167,11 +175,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showSettings() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(title: "MicMix Settings",
-                                        size: NSSize(width: 520, height: 640),
+                                        size: NSSize(width: 520, height: 680),
                                         content: SettingsView())
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(nil)
     }
 
     private func makeWindow<Content: View>(title: String, size: NSSize, content: Content) -> NSWindow {
