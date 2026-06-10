@@ -4,6 +4,38 @@ All notable changes to typeformic are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-06-11
+
+Platform-conventions pass: privacy, security, and system-integration
+behaviors brought in line with macOS standards.
+
+### Security & privacy
+- Dictation transcripts are no longer written to `/tmp`. Diagnostics go
+  through the unified logging system (`os.Logger`); transcript content is
+  marked `privacy: .private`, so release builds never persist what you said.
+  A plain-file mirror exists only in DEBUG builds behind `MICMIX_FILELOG=1`.
+- The model API key moved from UserDefaults (plaintext plist) into the
+  **macOS Keychain**, with a one-time migration that scrubs the legacy value
+  from disk.
+
+### Added
+- **Launch at login** toggle in Settings (`SMAppService`).
+- **About MicMix** panel in the menu-bar menu, with version and copyright.
+- `LSApplicationCategoryType` (Productivity) and a copyright string in the
+  app bundle.
+
+### Changed
+- The app declares `LSUIElement` in Info.plist instead of switching activation
+  policy at runtime, so no Dock icon flashes at launch.
+- The dictation pill and the translate overlay now share one visual grammar:
+  regular material, 16 pt corners, hairline stroke, the window's native
+  shadow, and the same circular tinted icon badge. The overlay placeholder is
+  English, matching the rest of the UI.
+
+### Fixed
+- All Swift concurrency warnings (non-Sendable buffer capture, two no-op
+  `await`s).
+
 ## [1.1.0] — 2026-06-10
 
 ### Added
