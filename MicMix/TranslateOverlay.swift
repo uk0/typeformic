@@ -124,12 +124,18 @@ private struct TranslateOverlayView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Image(systemName: "character.bubble.fill")
-                    .foregroundStyle(.tint)
-                    .font(.system(size: 14, weight: .semibold))
+            HStack(spacing: 12) {
+                // Same circular tinted badge as the dictation pill's indicator.
+                ZStack {
+                    Circle()
+                        .fill(.blue.opacity(0.18))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "character.bubble.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
 
-                TextField("说中文,按 ⏎ 翻译并插入", text: $controller.input)
+                TextField("Type Chinese — ⏎ inserts the English", text: $controller.input)
                     .textFieldStyle(.plain)
                     .font(.system(.callout))
                     .focused($fieldFocused)
@@ -172,9 +178,9 @@ private struct TranslateOverlayView: View {
         // Fills the panel content area exactly — so the rounded material is the
         // whole visible window and the window's shadow handles the soft edge.
         .frame(width: 460, height: 76)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.white.opacity(0.15), lineWidth: 1)
         )
         .onAppear { fieldFocused = true }

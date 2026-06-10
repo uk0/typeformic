@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createPanelIfNeeded() {
         guard panel == nil else { return }
-        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 492, height: 110)) {
+        panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 78)) {
             ContentView(controller: self.controller)
         }
         panel?.alphaValue = 0

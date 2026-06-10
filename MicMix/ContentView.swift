@@ -41,14 +41,14 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // Same visual grammar as the translate overlay: regular material,
+        // 16pt corners, 0.15 hairline, window-level shadow (set on the panel).
         .frame(width: 460, height: 78, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
-        .padding(16)
     }
 
     private var indicator: some View {
@@ -127,5 +127,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView(controller: DictationController())
-        .frame(width: 492, height: 110)
+        .frame(width: 460, height: 78)
 }

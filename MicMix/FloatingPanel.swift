@@ -27,9 +27,13 @@ final class FloatingPanel: NSPanel {
         self.isReleasedWhenClosed = false
         self.backgroundColor = .clear
         self.isOpaque = false
-        self.hasShadow = false
+        self.hasShadow = true
 
-        self.contentView = NSHostingView(rootView: content())
+        let hosting = NSHostingView(rootView: content())
+        // Keep the backing layer clear so nothing renders past the rounded material.
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        self.contentView = hosting
     }
 
     override var canBecomeKey: Bool { false }
