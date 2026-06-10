@@ -8,6 +8,7 @@
 import ServiceManagement
 import Speech
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @AppStorage(PolishConfig.Keys.dictationLocale) private var dictationLocale = ""
@@ -21,6 +22,9 @@ struct SettingsView: View {
     // Credentials live in the Keychain, not UserDefaults — so no @AppStorage here.
     @State private var apiKey = PolishConfig.storedAPIKey
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @AppStorage(AmbientListener.Keys.enabled) private var ambientEnabled = false
+    @AppStorage(AmbientListener.Keys.names) private var ambientNames = ""
+    @AppStorage(AmbientListener.Keys.wakePhrase) private var ambientWakePhrase = ""
     @State private var locales: [Locale] = []
     @State private var testResult = ""
     @State private var testing = false
@@ -40,6 +44,26 @@ struct SettingsView: View {
                             launchAtLogin = SMAppService.mainApp.status == .enabled
                         }
                     }
+            }
+
+            Section("Ambient Listening") {
+                Toggle("Listen in the background", isOn: $ambientEnabled)
+                    .onChange(of: ambientEnabled) { _, enabled in
+                        if enabled {
+                            Task {
+                                _ = try? await UNUserNotificationCenter.current()
+                                    .requestAuthorization(options: [.alert, .sound])
+                                AppDelegate.shared?.ambient.syncWithConfig()
+                            }
+                        } else {
+                            AppDelegate.shared?.ambient.syncWithConfig()
+                        }
+                    }
+                TextField("My names", text: $ambientNames, prompt: Text(verbatim: "小明, Alex"))
+                TextField("Wake phrase (starts dictation)", text: $ambientWakePhrase, prompt: Text(verbatim: "开始听写"))
+                Text("Hears the room entirely on-device — audio never leaves your Mac and nothing is stored. While enabled the microphone stays active and uses extra power. When someone says one of your names you get a notification with sound (audible in headphones). Saying the wake phrase starts dictation hands-free. Dictation pauses ambient listening automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Dictation") {

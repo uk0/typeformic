@@ -47,7 +47,7 @@ final class MicTranscriber: ObservableObject {
     private var peakLevel: Float = 0
     private var resultCount = 0
 
-    func requestAuthorization() async -> Bool {
+    static func requestAuthorization() async -> Bool {
         let speechAuthorized = await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { status in
                 cont.resume(returning: status == .authorized)
@@ -254,7 +254,7 @@ final class MicTranscriber: ObservableObject {
         try audioEngine.start()
     }
 
-    private nonisolated static func convert(buffer: AVAudioPCMBuffer,
+    nonisolated static func convert(buffer: AVAudioPCMBuffer,
                                             using converter: AVAudioConverter,
                                             to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         let ratio = format.sampleRate / buffer.format.sampleRate
@@ -272,7 +272,7 @@ final class MicTranscriber: ObservableObject {
         return output
     }
 
-    private static func preferredSupportedLocale() async -> Locale {
+    static func preferredSupportedLocale() async -> Locale {
         let supported = await SpeechTranscriber.supportedLocales
 
         // Explicit user choice from Settings wins, when supported.
@@ -294,14 +294,22 @@ final class MicTranscriber: ObservableObject {
         return supported.first ?? Locale(identifier: "en-US")
     }
 
-    private func ensureAssetsInstalled(for transcriber: SpeechTranscriber) async throws {
+    /// Downloads the language model for `transcriber` when missing.
+    /// Returns true when an install actually ran. Shared with AmbientListener.
+    static func ensureAssets(for transcriber: SpeechTranscriber) async throws -> Bool {
         guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
-            trace("assets: nothing to install (already available)")
-            return
+            return false
         }
-        trace("assets: installing…")
         try await request.downloadAndInstall()
-        trace("assets: install complete")
+        return true
+    }
+
+    private func ensureAssetsInstalled(for transcriber: SpeechTranscriber) async throws {
+        if try await Self.ensureAssets(for: transcriber) {
+            trace("assets: install complete")
+        } else {
+            trace("assets: nothing to install (already available)")
+        }
     }
 
     // MARK: - Diagnostics

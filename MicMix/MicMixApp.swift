@@ -7,6 +7,7 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 import SwiftUI
+import UserNotifications
 
 @main
 struct MicMixApp: App {
@@ -19,6 +20,12 @@ struct MicMixApp: App {
             }
             Button("Translate Input  ⌃⌥T") {
                 delegate.translateOverlay.toggle()
+            }
+            Button("Toggle Ambient Listening") {
+                let defaults = UserDefaults.standard
+                defaults.set(!defaults.bool(forKey: AmbientListener.Keys.enabled),
+                             forKey: AmbientListener.Keys.enabled)
+                delegate.ambient.syncWithConfig()
             }
             Button("Show / Hide Widget") {
                 delegate.togglePanel()
@@ -44,9 +51,12 @@ struct MicMixApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    static private(set) weak var shared: AppDelegate?
+
     let controller = DictationController()
     let translateOverlay = TranslateOverlayController()
+    let ambient = AmbientListener()
     private let dictationHotKey = HotKey()
     private let translateHotKey = HotKey()
     private var panel: FloatingPanel?
@@ -66,8 +76,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hidden by default — only wakes on the hotkey / dictation activity.
         createPanelIfNeeded()
 
+        Self.shared = self
+        UNUserNotificationCenter.current().delegate = self
+
         dictationHotKey.register(id: 1) { [weak self] in
             guard let self else { return }
+            // Release the mic for the dictation engine; resumes on .idle.
+            self.ambient.suspend()
             self.wakePanel()
             Task { await self.controller.toggle() }
         }
@@ -81,6 +96,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] phase in self?.handlePhase(phase) }
             .store(in: &cancellables)
+
+        ambient.onNameHeard = { [weak self] name, sentence in
+            self?.postNameCalledNotification(name: name, sentence: sentence)
+        }
+        ambient.onWakePhrase = { [weak self] in
+            guard let self, self.controller.phase == .idle else { return }
+            self.ambient.suspend()
+            self.wakePanel()
+            Task { await self.controller.toggle() }
+        }
+        ambient.syncWithConfig()
+    }
+
+    // MARK: - Ambient notifications
+
+    private func postNameCalledNotification(name: String, sentence: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Someone is calling you"
+        content.subtitle = name
+        content.body = sentence
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        )
+    }
+
+    /// Show ambient alerts as banners (with sound) even while we're "active".
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 
     // MARK: - Phase-driven visibility
@@ -93,8 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wakePanel()
         case .idle:
             if wasActive { wasActive = false; scheduleHide(after: 1.6) }
+            ambient.resume()
         case .error:
             if wasActive { wasActive = false; scheduleHide(after: 3.0) }
+            ambient.resume()
         }
     }
 

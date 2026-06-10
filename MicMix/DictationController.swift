@@ -58,7 +58,7 @@ final class DictationController: ObservableObject {
     }
 
     private func beginRecording() async {
-        guard await transcriber.requestAuthorization() else {
+        guard await MicTranscriber.requestAuthorization() else {
             phase = .error("Grant Microphone & Speech access in System Settings")
             return
         }
