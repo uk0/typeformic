@@ -4,6 +4,40 @@ All notable changes to typeformic are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0-beta.1] — 2026-06-11
+
+Beta — published on the `beta` branch for testing before a stable cut.
+
+### Added
+- **Ambient listening (opt-in, off by default).** A background on-device
+  listener built on the same `SpeechTranscriber` pipeline as dictation —
+  audio never leaves the Mac and nothing is stored.
+  - **Name-call alerts.** Configure one or more names (comma-separated).
+    When someone nearby says one, you get a system notification with sound —
+    audible in headphones — including the heard sentence.
+  - **Voice wake.** Saying a configurable wake phrase starts dictation
+    hands-free.
+  - Configuration in Settings → *Ambient Listening*, plus a quick
+    "Toggle Ambient Listening" item in the menu-bar menu.
+- Trigger matching is normalization-based (case / whitespace / punctuation
+  insensitive) with a 10-second cooldown so streaming partial results don't
+  spam notifications.
+
+### Changed
+- Dictation suspends ambient listening while it owns the microphone and
+  resumes it on return to idle, so your own dictation can't trigger alerts.
+- The ambient engine restarts itself after audio-stream interruptions
+  (device changes, sleep/wake).
+- `MicTranscriber`'s authorization, locale-selection, asset-install, and
+  buffer-conversion helpers became statics shared by both engines.
+
+### Known limitations (beta)
+- macOS exposes no low-power wake-word engine, so this runs continuous
+  on-device transcription: the orange microphone indicator stays on and
+  power use increases while enabled.
+- Matching is literal — add homophone variants of your name (e.g. 小茗 for
+  小明) to *My names* for better recall.
+
 ## [1.2.0] — 2026-06-11
 
 Platform-conventions pass: privacy, security, and system-integration
